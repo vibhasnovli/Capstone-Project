@@ -50,17 +50,20 @@ ZC_ROOT         = 1           # root index, coprime to ZC_LENGTH
 # =============================================================================
 # Burst Timing
 # =============================================================================
-BURST_RATE      = 100         # Hz - how often a full burst is transmitted
+BURST_RATE          = 100                 # Hz - target burst rate
 
 # Samples per OFDM symbol (including CP)
-SAMPLES_PER_SYMBOL  = FFT_SIZE + CP_LEN               # = 80 samples
+SAMPLES_PER_SYMBOL  = FFT_SIZE + CP_LEN   # = 80 samples
 
 # Samples per full burst (ZC preamble + all OFDM symbols)
 SAMPLES_PER_BURST   = ZC_LENGTH + (SAMPLES_PER_SYMBOL * NUM_SYMBOLS)
 
-# Inter-burst zero padding to hit exactly 100 Hz at 20 MHz sample rate
-SAMPLES_PER_PERIOD  = int(SAMPLE_RATE / BURST_RATE)   # = 200,000 samples
+# Set period to exactly 50000 samples to match USB transfer rate
+SAMPLES_PER_PERIOD  = 50000
 GUARD_SAMPLES       = SAMPLES_PER_PERIOD - SAMPLES_PER_BURST
+
+# Effective burst rate (informational — actual rate set by USB overhead)
+EFFECTIVE_BURST_RATE = 121  # Hz measured from hardware test
 
 # =============================================================================
 # Sanity Checks (run on import)
@@ -68,9 +71,9 @@ GUARD_SAMPLES       = SAMPLES_PER_PERIOD - SAMPLES_PER_BURST
 assert CP_LEN == FFT_SIZE // 4, \
     "CP length should be FFT_SIZE / 4"
 
+# Remove this old assertion and replace with:
 assert GUARD_SAMPLES > 0, \
-    f"Burst is longer than one period! Reduce NUM_SYMBOLS or increase SAMPLE_RATE.\n" \
-    f"SAMPLES_PER_BURST={SAMPLES_PER_BURST}, SAMPLES_PER_PERIOD={SAMPLES_PER_PERIOD}"
+    f"Burst is longer than period! SAMPLES_PER_BURST={SAMPLES_PER_BURST} > SAMPLES_PER_PERIOD={SAMPLES_PER_PERIOD}"
 
 assert len(PILOT_INDICES) == NUM_PILOTS, \
     "PILOT_INDICES length does not match NUM_PILOTS"

@@ -4,13 +4,12 @@ import sys
 import os
 import time
 
-# Import our utilities
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../python/utils'))
 from ofdm_params import (
     CENTER_FREQ, SAMPLE_RATE, TX_GAIN,
     SAMPLES_PER_PERIOD, BURST_RATE
 )
-from ofdm_transmitter import generate_tx_buffer
+from ofdm_transmitter import generate_tx_period
 
 
 # =============================================================================
@@ -18,14 +17,11 @@ from ofdm_transmitter import generate_tx_buffer
 # =============================================================================
 
 def configure_pluto_tx(sdr: adi.Pluto) -> None:
-    """
-    Configure the Pluto SDR for transmission.
-    """
-    sdr.sample_rate          = int(SAMPLE_RATE)
-    sdr.tx_rf_bandwidth      = int(SAMPLE_RATE)
-    sdr.tx_lo                = int(CENTER_FREQ)
-    sdr.tx_hardwaregain_chan0 = TX_GAIN        # negative = attenuation on Pluto
-    sdr.tx_cyclic_buffer     = True            # hardware repeats buffer automatically
+    sdr.sample_rate           = int(SAMPLE_RATE)
+    sdr.tx_rf_bandwidth       = int(SAMPLE_RATE)
+    sdr.tx_lo                 = int(CENTER_FREQ)
+    sdr.tx_hardwaregain_chan0 = TX_GAIN
+    sdr.tx_cyclic_buffer      = False   # disable cyclic — push periods manually
 
     print("=" * 45)
     print("        Pluto TX Configuration")
@@ -41,58 +37,46 @@ def configure_pluto_tx(sdr: adi.Pluto) -> None:
 # Main TX Loop
 # =============================================================================
 
-def run_tx(duration_sec: float = 30.0, num_periods: int = 10) -> None:
-    """
-    Transmit OFDM bursts continuously for a given duration.
+def run_tx(duration_sec: float = 30.0) -> None:
 
-    Parameters
-    ----------
-    duration_sec : float
-        How long to transmit in seconds (default 30s)
-    num_periods : int
-        Number of periods in the TX buffer loaded to the Pluto (default 10)
-        With tx_cyclic_buffer=True the hardware loops this automatically.
-    """
-
-    # 1. Connect to Pluto
+    # 1. Connect
     print("\nConnecting to Pluto...")
     sdr = adi.Pluto('ip:192.168.2.1')
 
-    # 2. Configure TX
+    # 2. Configure
     configure_pluto_tx(sdr)
 
-    # 3. Generate TX buffer
-    print(f"\nGenerating TX buffer ({num_periods} periods)...")
-    tx_buffer = generate_tx_buffer(num_periods=num_periods)
-    print(f"  Buffer length    : {len(tx_buffer)} samples")
-    print(f"  Buffer duration  : {len(tx_buffer)/SAMPLE_RATE*1000:.1f} ms")
-    print(f"  Will cycle for   : {duration_sec:.1f} seconds")
+    # 3. Generate exactly 50000 sample period
+    print(f"\nGenerating TX period (50000 samples)...")
+    tx_period = generate_tx_period()
+    print(f"  Period length    : {len(tx_period)} samples")
+    print(f"  Period duration  : {len(tx_period)/SAMPLE_RATE*1000:.1f} ms")
+    print(f"  Expected rate    : ~121 Hz")
+    print(f"  Transmitting for : {duration_sec:.1f} seconds\n")
 
-    # 4. Load buffer to Pluto and start transmitting
-    #    With tx_cyclic_buffer=True, the Pluto hardware loops this buffer
-    #    indefinitely at the hardware level — no Python loop needed
-    print("\nStarting transmission...")
-    sdr.tx(tx_buffer)
-    print(f"Transmitting at {CENTER_FREQ/1e9:.3f} GHz — {BURST_RATE} bursts/sec")
-    print("Press Ctrl+C to stop early.\n")
+    # 4. Push in loop — one period per push
+    print("Starting transmission... (Ctrl+C to stop early)")
+    start       = time.time()
+    burst_count = 0
 
-    # 5. Wait for duration then stop
     try:
-        start = time.time()
         while time.time() - start < duration_sec:
-            elapsed = time.time() - start
+            sdr.tx(tx_period)
+            burst_count += 1
+            elapsed   = time.time() - start
             remaining = duration_sec - elapsed
-            print(f"\r  Elapsed: {elapsed:.1f}s / {duration_sec:.1f}s  "
-                  f"Remaining: {remaining:.1f}s", end='', flush=True)
-            time.sleep(0.5)
+            print(f"\r  Bursts sent: {burst_count}  "
+                  f"Elapsed: {elapsed:.1f}s  "
+                  f"Remaining: {remaining:.1f}s   ",
+                  end='', flush=True)
+
     except KeyboardInterrupt:
         print("\n\nInterrupted by user.")
 
-    # 6. Clean shutdown
-    print("\nStopping transmission...")
-    sdr.tx_destroy_buffer()
-    print("TX buffer destroyed. Done.")
-
+    # 5. Done
+    elapsed = time.time() - start
+    print(f"\n\nDone. Sent {burst_count} bursts in {elapsed:.1f}s")
+    print(f"Effective burst rate: {burst_count/elapsed:.1f} Hz")
 
 # =============================================================================
 # Entry Point
@@ -104,8 +88,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="OFDM Channel Sounder TX")
     parser.add_argument('--duration', type=float, default=30.0,
                         help='Transmission duration in seconds (default: 30)')
-    parser.add_argument('--periods',  type=int,   default=10,
-                        help='Number of periods in TX buffer (default: 10)')
     args = parser.parse_args()
 
-    run_tx(duration_sec=args.duration, num_periods=args.periods)
+    run_tx(duration_sec=args.duration)
